@@ -4,206 +4,104 @@ local BF = BreakForge
 local Skin = ForgeSkin
 local MOD_KEY = "BreakForge"
 
--- ============================================================================
--- YARDIMCI FONKSİYONLAR
--- ============================================================================
-
--- 1. SKIN UYUMLU SLIDER
-local function CreateSkinSlider(parent, labelText, key, minVal, maxVal, step)
-    local frame = CreateFrame("Frame", nil, parent)
-    frame:SetSize(200, 40)
-    
-    local label = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    label:SetPoint("TOPLEFT", 0, 0)
-    label:SetText(labelText)
-    
-    local slider = CreateFrame("Slider", nil, frame, "OptionsSliderTemplate")
-    slider:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 0, -5)
-    slider:SetWidth(200)
-    slider:SetHeight(15)
-    slider:SetMinMaxValues(minVal, maxVal)
-    slider:SetValueStep(step)
-    slider:SetObeyStepOnDrag(true)
-    
-    -- ForgeSkin ile Süsleme
-    if Skin.ApplyBackdrop then
-        Skin:ApplyBackdrop(slider)
-        if Skin.Colors and Skin.Colors.bg then 
-            slider:SetBackdropColor(unpack(Skin.Colors.bg)) 
-        else
-            slider:SetBackdropColor(0.1, 0.1, 0.1, 1)
-        end
-        if Skin.SetSmartBorder then Skin:SetSmartBorder(slider) end
-    end
-
-    local valueText = slider:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    valueText:SetPoint("CENTER", slider, "CENTER", 0, 0)
-    
-    -- Değer Yükleme
-    local currentVal = addon.db[MOD_KEY][key] or minVal
-    slider:SetValue(currentVal)
-    valueText:SetText(currentVal)
-
-    slider:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value * 10 + 0.5) / 10 
-        addon.db[MOD_KEY][key] = value
-        valueText:SetText(value)
-        BF:UpdateStyle()
-    end)
-    
-    return frame
-end
-
--- 2. RENK SEÇİCİ (YENİ WOW API UYUMLU)
-local function CreateColorButton(parent, labelText, key)
-    local frame = CreateFrame("Frame", nil, parent)
-    frame:SetSize(200, 30)
-    
-    local label = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    label:SetPoint("LEFT", 0, 0)
-    label:SetText(labelText)
-    
-    -- Butonu Skin'in kendi fonksiyonuyla oluşturuyoruz (Varsa)
-    local btn
-    if Skin.CreateButton then
-        btn = Skin:CreateButton(frame, "", 40, 20)
-    else
-        btn = CreateFrame("Button", nil, frame, "BackdropTemplate")
-        btn:SetSize(40, 20)
-        Skin:ApplyBackdrop(btn)
-    end
-    btn:SetPoint("RIGHT", frame, "RIGHT", 0, 0)
-    
-    local function UpdateBtnColor()
-        local hex = addon.db[MOD_KEY][key]
-        local r, g, b = addon.Utilities:HexToRGB(hex)
-        -- ForgeSkin buton rengini eziyoruz ki seçilen renk görünsün
-        btn:SetBackdropColor(r, g, b, 1)
-    end
-    UpdateBtnColor()
-    
-    btn:SetScript("OnClick", function()
-        local r, g, b = addon.Utilities:HexToRGB(addon.db[MOD_KEY][key])
-        
-        -- [FIX] YENİ API (ColorPickerFrame)
-        local info = {
-            swatchFunc = function()
-                local nr, ng, nb = ColorPickerFrame:GetColorRGB()
-                local hex = string.format("%02x%02x%02x", nr*255, ng*255, nb*255)
-                addon.db[MOD_KEY][key] = hex
-                UpdateBtnColor()
-                BF:UpdateStyle()
-            end,
-            cancelFunc = function(restore)
-                -- restore eski API'de değerler listesiyken, yenisinde obje dönebilir.
-                -- Güvenlik için yeniden eski değeri hesaplıyoruz.
-                local hex = string.format("%02x%02x%02x", r*255, g*255, b*255)
-                addon.db[MOD_KEY][key] = hex
-                UpdateBtnColor()
-                BF:UpdateStyle()
-            end,
-            r = r, g = g, b = b,
-            hasOpacity = false,
-            opacity = 1.0,
-        }
-        
-        ColorPickerFrame:SetupColorPickerAndShow(info)
-    end)
-    
-    return frame
-end
-
--- ============================================================================
--- ANA PENCERE (ForgeSkin Style)
--- ============================================================================
+local function HexToColorTable(hex) local r, g, b, a = addon.Utilities:HexToRGB(hex); return {r, g, b, a or 1} end
+local function ColorTableToHex(c) return string.format("%02x%02x%02x", c[1]*255, c[2]*255, c[3]*255) end
 
 function BF:ToggleConfig()
-    if BF.ConfigFrame then
-        if BF.ConfigFrame:IsShown() then BF.ConfigFrame:Hide() else BF.ConfigFrame:Show() end
-        return
-    end
+    if BF.ConfigFrame then if BF.ConfigFrame:IsShown() then BF.ConfigFrame:Hide() else BF.ConfigFrame:Show() end return end
 
-    local f = CreateFrame("Frame", "BreakForgeConfig", UIParent)
-    f:SetSize(320, 520)
+    local f = CreateFrame("Frame", "BreakForgeConfig", UIParent, "BackdropTemplate")
+    f:SetSize(360, 680) -- Boyutu büyüttük çünkü yeni ayarlar geldi
     f:SetPoint("CENTER")
-    f:SetFrameStrata("DIALOG")
-    f:EnableMouse(true)
-    f:SetMovable(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", f.StopMovingOrSizing)
+    f:SetFrameStrata("DIALOG"); f:EnableMouse(true); f:SetMovable(true); f:SetClampedToScreen(true)
+    Skin:ApplyBackdrop(f); f:SetBackdropColor(unpack(Skin.Colors.bg)); Skin:SetSmartBorder(f)
+    local titleBar = Skin:CreateTitleBar(f, "Break Forge Settings", function() f:Hide() end)
 
-    -- 1. ForgeSkin Ana Zemin
-    Skin:ApplyBackdrop(f)
-    if Skin.Colors and Skin.Colors.bg then
-        f:SetBackdropColor(unpack(Skin.Colors.bg))
-    else
-        f:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
-    end
-    Skin:SetSmartBorder(f)
-
-    -- 2. Title Bar (Header)
-    local header = f:CreateTexture(nil, "ARTWORK")
-    header:SetPoint("TOPLEFT", 1, -1)
-    header:SetPoint("TOPRIGHT", -1, -1)
-    header:SetHeight(25)
-    if Skin.Colors and Skin.Colors.titleBg then
-        header:SetColorTexture(unpack(Skin.Colors.titleBg))
-    else
-        header:SetColorTexture(0.1, 0.1, 0.1, 1)
+    local startY = -50
+    local function CreateLabel(text, relativeTo, yOffset)
+        local lbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight"); lbl:SetText(text)
+        lbl:SetPoint("TOPLEFT", f, "TOPLEFT", 20, yOffset)
+        return lbl
     end
 
-    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("LEFT", header, "LEFT", 10, 0)
-    title:SetText("Break Forge")
-
-    -- 3. Kapat Butonu (ForgeSkin Button)
-    local closeBtn = Skin:CreateButton(f, "X", 20, 20)
-    closeBtn:SetPoint("TOPRIGHT", -2, -2)
-    -- Kapat butonu kırmızı olsun
-    closeBtn:SetBackdropColor(0.6, 0.1, 0.1, 1)
-    closeBtn:SetScript("OnClick", function() f:Hide() end)
-
-    -- ==========================================================
-    -- AYARLAR
-    -- ==========================================================
-    local offsetY = -40
-
-    -- [BOYUTLAR]
-    local sWidth = CreateSkinSlider(f, "Bar Genisligi", "Width", 100, 600, 10)
-    sWidth:SetPoint("TOP", 0, offsetY); offsetY = offsetY - 50
-
-    local sHeight = CreateSkinSlider(f, "Bar Yuksekligi", "Height", 10, 100, 1)
-    sHeight:SetPoint("TOP", 0, offsetY); offsetY = offsetY - 50
-
-    -- [POZİSYON]
-    local sX = CreateSkinSlider(f, "X Konumu", "X", -1000, 1000, 10)
-    sX:SetPoint("TOP", 0, offsetY); offsetY = offsetY - 50
-
-    local sY = CreateSkinSlider(f, "Y Konumu", "Y", -1000, 1000, 10)
-    sY:SetPoint("TOP", 0, offsetY); offsetY = offsetY - 50
-
-    -- [RENKLER]
-    local cBar = CreateColorButton(f, "Cast Bar Rengi", "CooldownColor")
-    cBar:SetPoint("TOP", 0, offsetY); offsetY = offsetY - 35
-
-    local cShield = CreateColorButton(f, "Shield (Kesilemez) Rengi", "NotInterruptibleColor")
-    cShield:SetPoint("TOP", 0, offsetY); offsetY = offsetY - 35
-
-    local cInt = CreateColorButton(f, "Interrupt Hazir Rengi", "InterruptibleColor")
-    cInt:SetPoint("TOP", 0, offsetY); offsetY = offsetY - 50
-
-    -- [TEST BUTONU]
-    local testBtn = Skin:CreateButton(f, "Test Modu", 120, 30)
-    testBtn:SetPoint("BOTTOM", 0, 20)
-    if Skin.Colors and Skin.Colors.accent then
-        testBtn:SetBackdropColor(unpack(Skin.Colors.accent)) -- Varsa tema rengini kullan
-    end
+    -- === GÖRSEL AYARLAR ===
+    Skin:CreateSectionHeader(f, "Visual Settings", 320):SetPoint("TOP", 0, startY + 10)
     
-    testBtn:SetScript("OnClick", function()
-        BF:Test(true)
-        C_Timer.After(3, function() BF:Test(false) end)
-    end)
+    -- [1] TEXTURE
+    local lblTex = CreateLabel("Texture", f, startY - 30)
+    local texItems = {}
+    for name, _ in pairs(Skin.Media.Textures) do table.insert(texItems, {text = name, value = name}) end
+    table.sort(texItems, function(a,b) return a.text < b.text end)
+    local ddTex = Skin:CreateDropdown(f, 200, texItems, function(val) addon.db[MOD_KEY].Texture = val; BF:UpdateStyle() end)
+    ddTex:SetPoint("LEFT", lblTex, "LEFT", 0, -25)
+    ddTex.text:SetText(addon.db[MOD_KEY].Texture or "Select...")
+
+    -- [2] FONT
+    local lblFont = CreateLabel("Font", f, startY - 80)
+    local fontItems = {}
+    for name, _ in pairs(Skin.Media.Fonts) do table.insert(fontItems, {text = name, value = name}) end
+    table.sort(fontItems, function(a,b) return a.text < b.text end)
+    local ddFont = Skin:CreateDropdown(f, 200, fontItems, function(val) addon.db[MOD_KEY].Font = val; BF:UpdateStyle() end)
+    ddFont:SetPoint("LEFT", lblFont, "LEFT", 0, -25)
+    ddFont.text:SetText(addon.db[MOD_KEY].Font or "Select...")
+
+    -- [3] FONT SIZE
+    local lblFSize = CreateLabel("Font Size", f, startY - 130)
+    local sFSize = Skin:CreateSlider(f, 8, 30, 1, addon.db[MOD_KEY].FontSize or 12, function(val) 
+        addon.db[MOD_KEY].FontSize = val; BF:UpdateStyle() 
+    end, 200)
+    sFSize:SetPoint("LEFT", lblFSize, "LEFT", 0, -25)
+
+    -- [4] BORDER SIZE & POSITION
+    local lblBorder = CreateLabel("Border", f, startY - 180)
+    local sBorder = Skin:CreateSlider(f, 0, 10, 1, addon.db[MOD_KEY].BorderSize or 1, function(val)
+        addon.db[MOD_KEY].BorderSize = val; BF:UpdateStyle()
+    end, 100)
+    sBorder:SetPoint("LEFT", lblBorder, "LEFT", 0, -25)
+    
+    -- Border Position Dropdown
+    local posItems = {
+        {text = "Inside", value = "INSIDE"},
+        {text = "Center", value = "CENTER"},
+        {text = "Outside", value = "OUTSIDE"}
+    }
+    local ddPos = Skin:CreateDropdown(f, 95, posItems, function(val) addon.db[MOD_KEY].BorderPosition = val; BF:UpdateStyle() end)
+    ddPos:SetPoint("LEFT", sBorder, "RIGHT", 5, 0)
+    ddPos.text:SetText(addon.db[MOD_KEY].BorderPosition or "OUTSIDE")
+
+    -- === BOYUT & KONUM ===
+    local sizeY = startY - 250
+    Skin:CreateSectionHeader(f, "Size & Position", 320):SetPoint("TOP", 0, sizeY + 10)
+    
+    local sWidth = Skin:CreateSlider(f, 100, 600, 10, addon.db[MOD_KEY].Width, function(val) addon.db[MOD_KEY].Width = val; BF:UpdateStyle() end, 150)
+    sWidth:SetPoint("TOPLEFT", 20, sizeY - 40)
+    
+    local sHeight = Skin:CreateSlider(f, 10, 100, 1, addon.db[MOD_KEY].Height, function(val) addon.db[MOD_KEY].Height = val; BF:UpdateStyle() end, 150)
+    sHeight:SetPoint("LEFT", sWidth, "RIGHT", 10, 0)
+
+    local sX = Skin:CreateSlider(f, -1000, 1000, 10, addon.db[MOD_KEY].X, function(val) addon.db[MOD_KEY].X = val; BF:UpdateStyle() end, 150)
+    sX:SetPoint("TOPLEFT", sWidth, "BOTTOMLEFT", 0, -30)
+    
+    local sY = Skin:CreateSlider(f, -1000, 1000, 10, addon.db[MOD_KEY].Y, function(val) addon.db[MOD_KEY].Y = val; BF:UpdateStyle() end, 150)
+    sY:SetPoint("LEFT", sX, "RIGHT", 10, 0)
+
+    -- === RENKLER ===
+    local colorY = sizeY - 140
+    Skin:CreateSectionHeader(f, "Colors", 320):SetPoint("TOP", 0, colorY + 10)
+
+    local cpBar = Skin:CreateColorPicker(f, "Cooldown Color (Waiting)", HexToColorTable(addon.db[MOD_KEY].CooldownColor), function(c) addon.db[MOD_KEY].CooldownColor = ColorTableToHex(c); BF:UpdateStyle() end, 320)
+    cpBar:SetPoint("TOPLEFT", 20, colorY - 30)
+
+    local cpInt = Skin:CreateColorPicker(f, "Ready Color (Interrupt!)", HexToColorTable(addon.db[MOD_KEY].InterruptibleColor), function(c) addon.db[MOD_KEY].InterruptibleColor = ColorTableToHex(c); BF:UpdateStyle() end, 320)
+    cpInt:SetPoint("TOPLEFT", 20, colorY - 70)
+
+    local cpShield = Skin:CreateColorPicker(f, "Shield Color (Uninterruptible)", HexToColorTable(addon.db[MOD_KEY].NotInterruptibleColor), function(c) addon.db[MOD_KEY].NotInterruptibleColor = ColorTableToHex(c); BF:UpdateStyle() end, 320)
+    cpShield:SetPoint("TOPLEFT", 20, colorY - 110)
+
+    -- === TEST BUTONU ===
+    local btnTest = Skin:CreateButton(f, "Test Mode", 140, 30)
+    btnTest:SetPoint("BOTTOM", 0, 30)
+    btnTest:SetScript("OnClick", function() BF:Test(true); C_Timer.After(3, function() BF:Test(false) end) end)
 
     BF.ConfigFrame = f
 end
