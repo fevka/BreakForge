@@ -13,9 +13,11 @@ BreakForge.Party = {
 local Party = BreakForge.Party
 
 -- ... (SYNC FUNCTIONS ARE SAME AS BEFORE) ...
-function Party:SendSync(spellID, duration)
+function Party:SendSync(spellID, duration, timestamp)
     if not IsInGroup() then return end
-    local msg = string.format("INT:%d:%d", spellID, duration)
+    -- [PROTOCOL v2] Add ServerTime for latency compensation
+    local ts = timestamp or GetServerTime()
+    local msg = string.format("INT:%d:%d:%d", spellID, duration, ts)
     local channel = "PARTY"
     if IsInGroup(LE_PARTY_CATEGORY_INSTANCE) then channel = "INSTANCE_CHAT"
     elseif IsInRaid() then channel = "RAID" end
@@ -25,10 +27,25 @@ end
 function Party:OnCommReceived(prefix, text, channel, sender)
     if prefix ~= self.commPrefix then return end
     if sender == UnitName("player") then return end
-    local cmd, spellID, duration = strsplit(":", text)
+    
+    local cmd, spellID, duration, timestamp = strsplit(":", text)
     spellID = tonumber(spellID)
     duration = tonumber(duration)
-    if cmd == "INT" and spellID and duration then self:UpdateBar(sender, spellID, duration) end
+    timestamp = tonumber(timestamp)
+    
+    if cmd == "INT" and spellID and duration then 
+        -- [LATENCY COMPENSATION]
+        local lag = 0
+        if timestamp then
+            local now = GetServerTime()
+            lag = now - timestamp
+            if lag < 0 then lag = 0 end -- Clock skew protection
+        end
+        local adjustedDuration = duration - lag
+        if adjustedDuration > 0 then
+            self:UpdateBar(sender, spellID, adjustedDuration) 
+        end
+    end
 end
 
 -- ============================================================================

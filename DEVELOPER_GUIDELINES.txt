@@ -15,16 +15,21 @@ PROJECT BREAKFORGE - API 12.0 DEVELOPMENT GUIDELINES & RESTRICTIONS
     if GetTime() < self.nextReadyTime then ... end
 
 [2] COOLDOWN TRACKING STRATEGY (CD TAKİP STRATEJİSİ)
-    Oyunun API'sine güvenmek yasak. "Fire and Forget" yöntemi kullanılacak.
+    Oyunun API'sine güvenmek yasak. Hibrit "Zero Latency" yöntemi kullanılacak.
     
-    1. Event Yakala: UNIT_SPELLCAST_SUCCEEDED (Oyuncu büyüyü başarıyla attı).
-    2. Manuel Kayıt: 
-       self.lastCastTime = GetTime()
-       self.cdDuration = 15 -- (Statik veriden okunacak)
-    3. Hesaplama:
-       Kalan Süre = (self.lastCastTime + self.cdDuration) - GetTime()
+    A. LOCAL PLAYER (KENDİMİZ):
+       1. Event: UNIT_SPELLCAST_SENT (Tuşa basıldığı an).
+       2. İşlem: Anında UI güncellemesi (UpdateBar).
+       3. Not: SUCCEEDED beklenmeyecek, gecikme kabul edilemez.
     
-    Bu yöntem %100 güvenlidir ve API kısıtlamalarına takılmaz.
+    B. PARTY MEMBERS (DİĞERLERİ):
+       1. Protokol: "INT:ID:DUR:TIMESTAMP"
+       2. Latency Compensation:
+          Lag = GetServerTime() - Timestamp
+          Kalan = Duration - Lag
+       3. Bu sayede "log okuma süresi" (iletişim gecikmesi) düşülür.
+    
+    Bu yöntem hem anında tepki verir hem de senkronizasyonu sağlar.
 
 [3] REMOVED / CHANGED FUNCTIONS (DEĞİŞEN FONKSİYONLAR)
     Blizzard API 11.0+ güncellemesi ile global fonksiyonları sildi.

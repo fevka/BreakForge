@@ -106,15 +106,35 @@ local function LoadClassInterrupt(self)
     else self.interruptID = 0; self.interruptCD = 0 end
 end
 
-local function RecordInterruptUsage(self, spellID, timestamp)
+local INTERRUPT_MODIFIERS = {
+    -- Death Knight: Mind Freeze
+    [47528] = { 
+        { talent = 378848, reduction = 2 }, -- Coldthirst (Verify ID)
+        { talent = 379353, reduction = 2 }, -- Coldthirst (Alt ID)
+    }
+}
+
+local function RecordInterruptUsage(self, spellID)
     if spellID == self.interruptID then 
-        -- [COMBAT LOG TIMESTAMP] Use server timestamp for perfect accuracy
-        -- timestamp is in milliseconds, convert to seconds
-        local serverTime = timestamp / 1000
-        self.nextReadyTime = serverTime + self.interruptCD
-        if BreakForge.Party then BreakForge.Party:SendSync(spellID, self.interruptCD) end
+        -- [ZERO LATENCY] Used UNIT_SPELLCAST_SENT, so we are at T=0.
+        self.lastSentTime = GetServerTime()
+        self.lastInteruptCastTime = GetTime() -- Heuristic Check
+        self.nextReadyTime = GetTime() + self.interruptCD
+        
+        if BreakForge.Party then 
+             -- Network Sync (Broadcast to others)
+             BreakForge.Party:SendSync(spellID, self.interruptCD)
+             -- Local Visual Update (Show on my screen immediately)
+             BreakForge.Party:UpdateBar(UnitName("player"), spellID, self.interruptCD)
+        end
     end
 end
+
+-- ...
+
+
+
+
 
 -- [MANUEL TAKİP]
 local function IsSpellReady(self)
@@ -138,12 +158,50 @@ local function InterruptHandler(self, guid)
     local interrupter = GetInterrupter(guid)
     self.frame.spellText:SetText(L["Interrupted"] .. ": " .. (interrupter or "Unknown"))
     SetBarInterruptedColor(self, true)
+    
+    -- [HEURISTIC CHECK] If we interrupt logic
+    if self.interruptID > 0 and self.lastInteruptCastTime then
+         if GetTime() - self.lastInteruptCastTime < 1.0 then 
+              -- High Probability WE interrupted
+              local mods = INTERRUPT_MODIFIERS[self.interruptID]
+              local reduction = 0
+              if mods then
+                  for _, mod in ipairs(mods) do
+                      if IsPlayerSpell(mod.talent) then
+                          reduction = reduction + mod.reduction
+                      end
+                  end
+              end
+              
+              if reduction > 0 then
+                  self.nextReadyTime = self.nextReadyTime - reduction
+                  local newDuration = self.interruptCD - reduction
+                   -- [SYNC UPDATE]
+                  if BreakForge.Party then 
+                      BreakForge.Party:SendSync(self.interruptID, newDuration, self.lastSentTime) 
+                  end
+                  
+                  -- [LOCAL UPDATE]
+                  if self.active then
+                       -- Force Update Duration
+                        local startTime = (self.nextReadyTime - newDuration) * 1000
+                        local endTime = self.nextReadyTime * 1000
+                        self.frame.durationObj = CreateDurationObject(startTime, endTime)
+                        if BreakForge.Party then BreakForge.Party:UpdateBar(UnitName("player"), self.interruptID, newDuration) end
+                  end
+              end
+              
+              self.lastInteruptCastTime = nil -- Reset to avoid double triggering
+         end
+    end
+
     self.active = false
     if self.timer then self.timer:Cancel() end
     self.timer = C_Timer.NewTimer(0.75, function() self.timer=nil; self.frame:Hide(); SetBarInterruptedColor(self, false) end)
 end
 
 local function CastsHandler(self, duration, isChannel, notInterruptible)
+    self.frame.durationObj = duration -- [FIX] Store on frame for dynamic access
     self.frame.statusBar:SetMinMaxValues(0, duration:GetTotalDuration())
     
     -- [FIX] Upvalue capture fix with pcall for safety
@@ -151,12 +209,16 @@ local function CastsHandler(self, duration, isChannel, notInterruptible)
     local success, result = pcall(function() return notInterruptible == true end)
     if success then isShielded = result end
 
-    self.frame:SetScript("OnUpdate", function ()
+    self.frame:SetScript("OnUpdate", function (f)
         if self.isTesting or self.isUnlocked then return end
         if not self.active then return end
-        local remaining = isChannel and duration:GetRemainingDuration() or duration:GetElapsedDuration()
-        self.frame.statusBar:SetValue(remaining)
-        self.frame.timeText:SetText(string.format("%.1f", duration:GetRemainingDuration()))
+        -- [DYNAMIC] Use stored duration object
+        local dObj = f.durationObj
+        if not dObj then return end -- Safety
+        
+        local remaining = isChannel and dObj:GetRemainingDuration() or dObj:GetElapsedDuration()
+        f.statusBar:SetValue(remaining)
+        f.timeText:SetText(string.format("%.1f", dObj:GetRemainingDuration()))
         
         -- Renk Mantığı (Tek Bar)
         local db = addon.db[MOD_KEY]
@@ -172,11 +234,47 @@ local function CastsHandler(self, duration, isChannel, notInterruptible)
              r,g,b = addon.Utilities:HexToRGB(db.ColorCooldown)
         end
         
-        self.frame.statusBar:SetStatusBarColor(r,g,b)
+        f.statusBar:SetStatusBarColor(r,g,b)
     end)
     self.frame:SetAlphaFromBoolean(addon.db[MOD_KEY]["Hidden"], 0, 255)
     self.frame:Show()
 end
+
+-- Update CheckInterruptSuccess to effectively update the local bar
+local function CheckInterruptSuccess(self, spellID)
+    local mods = INTERRUPT_MODIFIERS[spellID]
+    if not mods then return end
+    
+    local reduction = 0
+    for _, mod in ipairs(mods) do
+        if IsPlayerSpell(mod.talent) then
+            reduction = reduction + mod.reduction
+        end
+    end
+    
+    if reduction > 0 then
+        self.nextReadyTime = self.nextReadyTime - reduction
+        local newDuration = self.interruptCD - reduction
+        
+        -- [SYNC UPDATE]
+        if BreakForge.Party then 
+            BreakForge.Party:SendSync(spellID, newDuration, self.lastSentTime) 
+        end
+        
+        -- [LOCAL UPDATE]
+        if self.frame and self.active then
+            local startTime = (self.nextReadyTime - newDuration) * 1000
+            local endTime = self.nextReadyTime * 1000
+            self.frame.durationObj = CreateDurationObject(startTime, endTime)
+            -- Update party bar for self too
+            if BreakForge.Party then BreakForge.Party:UpdateBar(UnitName("player"), spellID, newDuration) end
+        end
+    end
+end
+
+-- ...
+
+
 
 local function Handler(self)
     if self.isTesting or self.isUnlocked then return end
@@ -291,15 +389,13 @@ function BreakForge:RegisterEvents()
     local Start = function() if self.timer then self.timer:Cancel(); self.timer=nil end; self.active=true; Handler(self) end
     local Stop = function(ev,...) if ev=="UNIT_SPELLCAST_INTERRUPTED" then local _,_,_,g=...; if g then InterruptHandler(self,g); self.isInterrupted=true end end; if not self.timer then self.active=false; self.frame:Hide() end end
     
-    -- [COMBAT LOG TIMESTAMP] Use server timestamp for perfect sync
-    eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-    eventFrame:HookScript("OnEvent", function(_, event) 
-        if event == "COMBAT_LOG_EVENT_UNFILTERED" then 
-            local timestamp, subevent, _, sourceGUID, _, _, _, _, _, _, _, spellID = CombatLogGetCurrentEventInfo()
-            -- Check if this is our spell being cast successfully
-            if subevent == "SPELL_CAST_SUCCESS" and sourceGUID == UnitGUID("player") then
-                RecordInterruptUsage(BreakForge, spellID, timestamp)
-            end
+    -- [ZERO LATENCY FIX] Use SENT -> Instant Customer Side Response
+    eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_SENT", "player")
+
+    eventFrame:HookScript("OnEvent", function(_, event, unit, target, castGUID, spellID) 
+        if event == "UNIT_SPELLCAST_SENT" and unit == "player" then 
+             -- Note: SENT args: unit, target, castGUID, spellID
+             RecordInterruptUsage(BreakForge, spellID) 
         end 
     end)
     
