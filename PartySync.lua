@@ -16,7 +16,9 @@ local Party = BreakForge.Party
 function Party:SendSync(spellID, duration)
     if not IsInGroup() then return end
     local msg = string.format("INT:%d:%d", spellID, duration)
-    local channel = IsInRaid() and "RAID" or "PARTY"
+    local channel = "PARTY"
+    if IsInGroup(LE_PARTY_CATEGORY_INSTANCE) then channel = "INSTANCE_CHAT"
+    elseif IsInRaid() then channel = "RAID" end
     C_ChatInfo.SendAddonMessage(self.commPrefix, msg, channel)
 end
 
@@ -95,7 +97,7 @@ function Party:CreateBar(name)
     if Skin and Skin.Media and Skin.Media.Textures then texture = Skin.Media.Textures[db.Texture] or texture end
     row.timerBar:SetStatusBarTexture(texture)
     
-    local r, g, b = addon.Utilities:HexToRGB(db.CooldownColor)
+    local r, g, b = addon.Utilities:HexToRGB(db.ColorCooldown)
     row.timerBar:SetStatusBarColor(r, g, b, 1)
     row.timerBar:SetMinMaxValues(0, 1); row.timerBar:SetValue(1)
     
@@ -132,7 +134,7 @@ function Party:UpdateBar(senderName, spellID, duration, dummyClassColor)
     end
     bar.classStrip:SetColorTexture(classColor.r, classColor.g, classColor.b, 1)
     
-    local r, g, b = addon.Utilities:HexToRGB(db.CooldownColor)
+    local r, g, b = addon.Utilities:HexToRGB(db.ColorCooldown)
     bar.timerBar:SetStatusBarColor(r, g, b, 1)
     
     bar.endTime = GetTime() + duration

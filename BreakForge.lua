@@ -28,7 +28,7 @@ addon.dbDefault = {
         BorderPosition = "OUTSIDE",
         
         -- Renkler
-        CooldownColor = "FF7700", InterruptibleColor = "FF0000",
+        ColorCooldown = "FF0000", ColorReady = "FF7700",
         NotInterruptibleColor = "808080", InterruptedColor = "00FF00",
         
         CooldownHide = false, NotInterruptibleHide = false, SoundMedia = "RaidWarning"
@@ -106,15 +106,19 @@ local function LoadClassInterrupt(self)
     else self.interruptID = 0; self.interruptCD = 0 end
 end
 
-local function RecordInterruptUsage(self, spellID)
+local function RecordInterruptUsage(self, spellID, timestamp)
     if spellID == self.interruptID then 
-        self.nextReadyTime = GetTime() + self.interruptCD
+        -- [COMBAT LOG TIMESTAMP] Use server timestamp for perfect accuracy
+        -- timestamp is in milliseconds, convert to seconds
+        local serverTime = timestamp / 1000
+        self.nextReadyTime = serverTime + self.interruptCD
         if BreakForge.Party then BreakForge.Party:SendSync(spellID, self.interruptCD) end
     end
 end
 
 -- [MANUEL TAKİP]
 local function IsSpellReady(self)
+    -- [MANUEL TAKİP]
     if self.interruptID == 0 then return false end
     if GetTime() <= self.nextReadyTime then return false end
     return true
@@ -124,10 +128,9 @@ local function GetInterrupter(guid) return UnitNameFromGUID(guid) end
 
 local function SetBarInterruptedColor(self, interrupted)
     if interrupted then
-        self.frame.notInterruptibleBar:SetAlpha(0); self.frame.interruptReadyBar:SetAlpha(0); self.frame.statusBar:SetAlpha(1)
         self.frame.statusBar:SetStatusBarColor(addon.Utilities:HexToRGB(addon.db[MOD_KEY]["InterruptedColor"]))
     else
-        self.frame.statusBar:SetStatusBarColor(addon.Utilities:HexToRGB(addon.db[MOD_KEY]["CooldownColor"]))
+        self.frame.statusBar:SetStatusBarColor(addon.Utilities:HexToRGB(addon.db[MOD_KEY]["ColorCooldown"]))
     end
 end
 
@@ -141,23 +144,35 @@ local function InterruptHandler(self, guid)
 end
 
 local function CastsHandler(self, duration, isChannel, notInterruptible)
-    self.frame.notInterruptibleBar:SetMinMaxValues(0, duration:GetTotalDuration())
-    self.frame.interruptReadyBar:SetMinMaxValues(0, duration:GetTotalDuration())
     self.frame.statusBar:SetMinMaxValues(0, duration:GetTotalDuration())
     
+    -- [FIX] Upvalue capture fix with pcall for safety
+    local isShielded = false
+    local success, result = pcall(function() return notInterruptible == true end)
+    if success then isShielded = result end
+
     self.frame:SetScript("OnUpdate", function ()
         if self.isTesting or self.isUnlocked then return end
         if not self.active then return end
         local remaining = isChannel and duration:GetRemainingDuration() or duration:GetElapsedDuration()
-        self.frame.notInterruptibleBar:SetValue(remaining)
-        self.frame.interruptReadyBar:SetValue(remaining)
         self.frame.statusBar:SetValue(remaining)
         self.frame.timeText:SetText(string.format("%.1f", duration:GetRemainingDuration()))
         
-        self.frame.notInterruptibleBar:SetAlphaFromBoolean(notInterruptible)
-        local isReady = IsSpellReady(self)
-        self.frame.interruptReadyBar:SetAlphaFromBoolean(isReady)
-        if addon.db[MOD_KEY]["CooldownHide"] then self.frame:SetAlphaFromBoolean(isReady) end
+        -- Renk Mantığı (Tek Bar)
+        local db = addon.db[MOD_KEY]
+        local r,g,b = 1,1,1
+        
+        if self.isInterrupted then
+             r,g,b = addon.Utilities:HexToRGB(db.InterruptedColor)
+        elseif isShielded then
+             r,g,b = addon.Utilities:HexToRGB(db.NotInterruptibleColor)
+        elseif IsSpellReady(self) then
+             r,g,b = addon.Utilities:HexToRGB(db.ColorReady)
+        else
+             r,g,b = addon.Utilities:HexToRGB(db.ColorCooldown)
+        end
+        
+        self.frame.statusBar:SetStatusBarColor(r,g,b)
     end)
     self.frame:SetAlphaFromBoolean(addon.db[MOD_KEY]["Hidden"], 0, 255)
     self.frame:Show()
@@ -175,6 +190,7 @@ local function Handler(self)
     local targetName = UnitSpellTargetName(unit)
     self.frame.spellText:SetText(targetName and (name.." -> "..targetName) or name)
     self.frame.icon:SetTexture(texture or UNKNOWN_SPELL_TEXTURE)
+    self.isInterrupted = false -- Reset state
     CastsHandler(self, duration, isChannel, notInterruptible)
 end
 
@@ -208,7 +224,6 @@ function BreakForge:Initialize()
     -- [İKON ÇERÇEVESİ]
     self.frame.iconBox = CreateFrame("Frame", nil, self.frame, "BackdropTemplate")
     self.frame.iconBox:SetPoint("LEFT", 0, 0)
-    -- Kenarlık ekle (1px siyah)
     self.frame.iconBox:SetBackdrop({edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1})
     self.frame.iconBox:SetBackdropBorderColor(0,0,0,1)
 
@@ -217,10 +232,9 @@ function BreakForge:Initialize()
     self.frame.icon:SetPoint("BOTTOMRIGHT", -1, 1)
     
     self.frame.statusBar = CreateFrame("StatusBar", nil, self.frame); self.frame.statusBar:SetPoint("RIGHT"); AddMixin(self.frame.statusBar)
-    self.frame.interruptReadyBar = CreateFrame("StatusBar", nil, self.frame); self.frame.interruptReadyBar:SetPoint("RIGHT"); AddMixin(self.frame.interruptReadyBar)
-    self.frame.notInterruptibleBar = CreateFrame("StatusBar", nil, self.frame); self.frame.notInterruptibleBar:SetPoint("RIGHT"); AddMixin(self.frame.notInterruptibleBar)
+    -- Single Bar Mode: removed extra bars
 
-    self.frame.textFrame = CreateFrame("Frame", nil, self.frame); self.frame.textFrame:SetAllPoints(true); self.frame.textFrame:SetFrameLevel(self.frame.notInterruptibleBar:GetFrameLevel() + 1)
+    self.frame.textFrame = CreateFrame("Frame", nil, self.frame); self.frame.textFrame:SetAllPoints(true); self.frame.textFrame:SetFrameLevel(self.frame.statusBar:GetFrameLevel() + 1)
     self.frame.spellText = self.frame.textFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight"); self.frame.spellText:SetJustifyH("LEFT")
     self.frame.timeText = self.frame.textFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight"); self.frame.timeText:SetJustifyH("RIGHT")
 
@@ -254,7 +268,7 @@ function BreakForge:UpdateStyle()
     local fontPath = "Fonts\\FRIZQT__.TTF"
     if ForgeSkin and ForgeSkin.Media and ForgeSkin.Media.Fonts then fontPath = ForgeSkin.Media.Fonts[db.Font] or fontPath end
     local fontSize = db.FontSize or 12
-    local fontOutline = db.FontOutline or "OUTLINE" -- [YENİ]
+    local fontOutline = db.FontOutline or "OUTLINE"
 
     local function UpdateBar(bar, colorHex)
         bar:SetSize(barWidth, db.Height)
@@ -262,9 +276,8 @@ function BreakForge:UpdateStyle()
         bar:SetStatusBarColor(addon.Utilities:HexToRGB(colorHex))
     end
     
-    UpdateBar(self.frame.statusBar, db.CooldownColor)
-    UpdateBar(self.frame.interruptReadyBar, db.InterruptibleColor)
-    UpdateBar(self.frame.notInterruptibleBar, db.NotInterruptibleColor)
+    UpdateBar(self.frame.statusBar, db.ColorCooldown)
+    -- Single Bar Mode: removed extra updates
     
     self.frame.spellText:SetPoint("LEFT", self.frame, "LEFT", db.Height + 5, 0)
     self.frame.spellText:SetSize(0.7 * barWidth, fontSize)
@@ -275,12 +288,19 @@ function BreakForge:UpdateStyle()
 end
 
 function BreakForge:RegisterEvents()
-    local Start = function() if self.timer then self.timer:Cancel(); self.timer=nil; SetBarInterruptedColor(self,false) end; self.active=true; Handler(self) end
-    local Stop = function(ev,...) if ev=="UNIT_SPELLCAST_INTERRUPTED" then local _,_,_,g=...; if g then InterruptHandler(self,g) end end; if not self.timer then self.active=false; self.frame:Hide() end end
+    local Start = function() if self.timer then self.timer:Cancel(); self.timer=nil end; self.active=true; Handler(self) end
+    local Stop = function(ev,...) if ev=="UNIT_SPELLCAST_INTERRUPTED" then local _,_,_,g=...; if g then InterruptHandler(self,g); self.isInterrupted=true end end; if not self.timer then self.active=false; self.frame:Hide() end end
     
-    eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
-    eventFrame:HookScript("OnEvent", function(_, event, unit, _, spellID) 
-        if event == "UNIT_SPELLCAST_SUCCEEDED" and unit == "player" then RecordInterruptUsage(BreakForge, spellID) end 
+    -- [COMBAT LOG TIMESTAMP] Use server timestamp for perfect sync
+    eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+    eventFrame:HookScript("OnEvent", function(_, event) 
+        if event == "COMBAT_LOG_EVENT_UNFILTERED" then 
+            local timestamp, subevent, _, sourceGUID, _, _, _, _, _, _, _, spellID = CombatLogGetCurrentEventInfo()
+            -- Check if this is our spell being cast successfully
+            if subevent == "SPELL_CAST_SUCCESS" and sourceGUID == UnitGUID("player") then
+                RecordInterruptUsage(BreakForge, spellID, timestamp)
+            end
+        end 
     end)
     
     addon.eventsHandler:Register(Start, "UNIT_SPELLCAST_START", "target"); addon.eventsHandler:Register(Start, "UNIT_SPELLCAST_START", "focus")
@@ -290,7 +310,10 @@ function BreakForge:RegisterEvents()
     addon.eventsHandler:Register(Stop, "UNIT_SPELLCAST_INTERRUPTED", "target"); addon.eventsHandler:Register(Stop, "UNIT_SPELLCAST_INTERRUPTED", "focus")
     addon.eventsHandler:Register(function() LoadClassInterrupt(BreakForge) end, "PLAYER_SPECIALIZATION_CHANGED")
     C_ChatInfo.RegisterAddonMessagePrefix(self.commPrefix)
-    addon.eventsHandler:Register(function(...) if BreakForge.Party then BreakForge.Party:OnCommReceived(...) end end, "CHAT_MSG_ADDON")
+    addon.eventsHandler:Register(function(event, ...) 
+        local text, prefix, channel, sender = ...
+        if BreakForge.Party then BreakForge.Party:OnCommReceived(prefix, text, channel, sender) end 
+    end, "CHAT_MSG_ADDON")
 end
 
 function BreakForge:Test(toggle)
@@ -302,8 +325,8 @@ function BreakForge:Test(toggle)
         self.frame.spellText:SetText("Test Mode")
         self.frame.icon:SetTexture(UNKNOWN_SPELL_TEXTURE)
         self.frame.statusBar:SetMinMaxValues(0, 10); self.frame.statusBar:SetValue(10)
-        self.frame.interruptReadyBar:SetMinMaxValues(0, 10); self.frame.interruptReadyBar:SetValue(10)
-        self.frame.interruptReadyBar:SetAlpha(1); self.frame.timeText:SetText("10.0")
+        self.frame.statusBar:SetStatusBarColor(addon.Utilities:HexToRGB(addon.db[MOD_KEY].ColorReady)) -- Default to ready color for test
+        self.frame.timeText:SetText("10.0")
         if self.Party then self.Party:Test(true) end
     else
         self.active = false; self.frame:Hide()
@@ -318,7 +341,6 @@ function BreakForge:ToggleUnlock()
         self.frame:Show(); self.frame:EnableMouse(true)
         self.frame.spellText:SetText("|cff00ff00MAIN BAR (DRAG)|r")
         self.frame.statusBar:SetStatusBarColor(0.5, 0.5, 0.5, 1)
-        self.frame.interruptReadyBar:SetAlpha(0)
         if self.Party then self.Party:ToggleUnlock(true) end
     else
         self.frame:EnableMouse(false); self.frame:Hide()
@@ -341,4 +363,17 @@ loader:SetScript("OnEvent", function(self, event, arg1)
 end)
 
 SLASH_BREAKFORGE1 = "/bf"
-SlashCmdList["BREAKFORGE"] = function(msg) if BreakForge.ToggleConfig then BreakForge:ToggleConfig() else print("Config modul yok.") end end
+SlashCmdList["BREAKFORGE"] = function(msg) 
+    if msg == "debug" then
+        local self = BreakForge
+        -- [COMPLIANT] No API Call
+        local now = GetTime()
+        local cdRem = (self.nextReadyTime > now) and (self.nextReadyTime - now) or 0
+        print("BF Debug (Manual): Class="..tostring(addon.characterClass).." IntID="..tostring(self.interruptID))
+        print("BF Debug: NextReady="..tostring(self.nextReadyTime).." Now="..tostring(now).." Rem="..string.format("%.1f", cdRem))
+    elseif BreakForge.ToggleConfig then 
+        BreakForge:ToggleConfig() 
+    else 
+        print("BreakForge: /bf debug or Config UI missing.") 
+    end 
+end
