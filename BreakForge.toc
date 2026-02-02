@@ -2,14 +2,10 @@
 ## Title: Break Forge
 ## Notes: Advanced Interrupt & Coordination Tool
 ## Author: You
-## Version: 2.0
+## Version: 2.5
 ## SavedVariables: BreakForgeDB
 
-# Görsel Motor (Eğer kullanıyorsan)
 ForgeSkin.lua
-
-# Ana Mantık
 BreakForge.lua
-
-# Ayarlar
+PartySync.lua
 Config.lua

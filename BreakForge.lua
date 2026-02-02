@@ -10,19 +10,16 @@ addon.dbDefault = {
         Enabled = true, Hidden = false, Mute = false, 
         Width = 300, Height = 30, X = 0, Y = -150, IconZoom = 0.1, 
         
+        -- Party Ayarları
+        PartyEnabled = true, PartyWidth = 200, PartyHeight = 20, PartyX = -200, PartyY = 0,
+        
         -- Görsel Ayarlar
-        Texture = "2. Smooth",
-        Font = "Friz Quadrata", -- Varsayılan Font İsmi
-        FontSize = 12,          -- Varsayılan Boyut
-        BackgroundAlpha = 0.8,
-        BorderSize = 1,
-        BorderPosition = "OUTSIDE", -- Seçenekler: "INSIDE", "CENTER", "OUTSIDE"
+        Texture = "2. Smooth", Font = "Friz Quadrata", FontSize = 12, 
+        BackgroundAlpha = 0.8, BorderSize = 1, BorderPosition = "OUTSIDE",
         
         -- Renkler
-        CooldownColor = "FF7700",      -- TURUNCU
-        InterruptibleColor = "FF0000", -- KIRMIZI
-        NotInterruptibleColor = "808080", -- GRİ
-        InterruptedColor = "00FF00",   -- YEŞİL
+        CooldownColor = "FF7700", InterruptibleColor = "FF0000",
+        NotInterruptibleColor = "808080", InterruptedColor = "00FF00",
         
         CooldownHide = false, NotInterruptibleHide = false, SoundMedia = "RaidWarning"
     }
@@ -30,22 +27,18 @@ addon.dbDefault = {
 addon.db = addon.dbDefault 
 addon.characterClass = select(2, UnitClass("player"))
 
--- [MOCK] Utilities
 addon.Utilities = {
     HexToRGB = function(self, hex)
         if not hex then return 1,1,1,1 end
         local r, g, b = string.sub(hex, 1, 2), string.sub(hex, 3, 4), string.sub(hex, 5, 6)
         return tonumber(r, 16)/255, tonumber(g, 16)/255, tonumber(b, 16)/255, 1
-    end,
-    MakeFrameDragPosition = function(self, frame) end 
+    end
 }
 
--- [MOCK] Event Handler
 local eventFrame = CreateFrame("Frame"); local eventRegistry = {}
 eventFrame:SetScript("OnEvent", function(self, event, ...) if eventRegistry[event] then for _, func in ipairs(eventRegistry[event]) do func(event, ...) end end end)
 addon.eventsHandler = { Register = function(self, func, event, unit) if not eventRegistry[event] then eventRegistry[event] = {}; if unit then eventFrame:RegisterUnitEvent(event, "target", "focus") else eventFrame:RegisterEvent(event) end end table.insert(eventRegistry[event], func) end }
 
--- [MOCK] Locale & Safe Alpha
 local LibStub = { GetLocale = function() return { ["Interrupted"] = "KESILDI" } end }
 local function SetAlphaFromBoolean(self, condition, trueAlpha, falseAlpha)
     local success, _ = pcall(function() if condition then self:SetAlpha(trueAlpha or 1) else self:SetAlpha(falseAlpha or 0) end end)
@@ -65,13 +58,14 @@ if not _G.UnitCastingDuration then _G.UnitCastingDuration = function(u) local _,
 if not _G.UnitChannelDuration then _G.UnitChannelDuration = function(u) local _,_,_,s,e=UnitChannelInfo(u); return CreateDurationObject(s or 0,e or 0) end end
 
 -- ============================================================================
--- 2. BÖLÜM: CORE MANTIK
+-- 2. BÖLÜM: CORE MANTIK (PLAYER ONLY)
 -- ============================================================================
 
 BreakForge = { 
     frame = nil, active = false, 
     interruptID = 0, interruptCD = 0, nextReadyTime = 0, 
-    subInterrupt = nil, timer = nil, commPrefix = "BF_SYNC" 
+    subInterrupt = nil, timer = nil, commPrefix = "BF_SYNC",
+    isTesting = false, isUnlocked = false
 }
 _G["BreakForge"] = BreakForge
 local L = LibStub.GetLocale(ADDON_NAME); local MOD_KEY = "BreakForge"; local UNKNOWN_SPELL_TEXTURE = 134400
@@ -81,13 +75,13 @@ local INTERRUPT_DATA = {
     WARRIOR = { DEFAULT = {id = 6552, cd = 15} },
     ROGUE   = { DEFAULT = {id = 1766, cd = 15} },
     MAGE    = { DEFAULT = {id = 2139, cd = 24} },
-    SHAMAN  = { DEFAULT = {id = 57994, cd = 12}, [3] = {id = 57994, cd = 30} }, -- Resto 30sn
     DEATHKNIGHT = { DEFAULT = {id = 47528, cd = 15} },
     PALADIN = { DEFAULT = {id = 96231, cd = 15} },
     MONK    = { DEFAULT = {id = 116705, cd = 15} },
     DEMONHUNTER = { DEFAULT = {id = 183752, cd = 15} },
     EVOKER  = { DEFAULT = {id = 351338, cd = 20} },
     WARLOCK = { DEFAULT = {id = 119914, cd = 24} },
+    SHAMAN  = { DEFAULT = {id = 57994, cd = 12}, [3] = {id = 57994, cd = 30} },
     PRIEST  = { DEFAULT = {id = 0, cd = 0}, [3] = {id = 15487, cd = 45} },
     HUNTER  = { DEFAULT = {id = 147362, cd = 24}, [3] = {id = 187707, cd = 15} },
     DRUID   = { DEFAULT = {id = 106839, cd = 15}, [1] = {id = 78675, cd = 60} },
@@ -103,8 +97,15 @@ local function LoadClassInterrupt(self)
     else self.interruptID = 0; self.interruptCD = 0 end
 end
 
+-- [CORE] Interrupt Kullanımı Kaydet & Sync Gönder
 local function RecordInterruptUsage(self, spellID)
-    if spellID == self.interruptID then self.nextReadyTime = GetTime() + self.interruptCD end
+    if spellID == self.interruptID then 
+        self.nextReadyTime = GetTime() + self.interruptCD
+        -- [MODULER CALL] Party Modülüne Haber Ver
+        if BreakForge.Party then
+            BreakForge.Party:SendSync(spellID, self.interruptCD)
+        end
+    end
 end
 
 local function IsSpellReady(self)
@@ -138,6 +139,7 @@ local function CastsHandler(self, duration, isChannel, notInterruptible)
     self.frame.statusBar:SetMinMaxValues(0, duration:GetTotalDuration())
     
     self.frame:SetScript("OnUpdate", function ()
+        if self.isTesting or self.isUnlocked then return end
         if not self.active then return end
         local remaining = isChannel and duration:GetRemainingDuration() or duration:GetElapsedDuration()
         self.frame.notInterruptibleBar:SetValue(remaining)
@@ -155,6 +157,7 @@ local function CastsHandler(self, duration, isChannel, notInterruptible)
 end
 
 local function Handler(self)
+    if self.isTesting or self.isUnlocked then return end
     if not addon.db[MOD_KEY]["Enabled"] then self.frame:Hide(); return end
     local unit = "target"; if not UnitExists("target") then unit = "focus" end
     local name, _, texture, _, _, _, notInterruptible = UnitChannelInfo(unit)
@@ -174,6 +177,21 @@ function BreakForge:Initialize()
     self.frame:SetFrameStrata("HIGH")
     self.frame:Hide()
     AddMixin(self.frame)
+
+    -- [MODULER] Party Modülünü Başlat
+    if self.Party then self.Party:Initialize() end
+
+    -- MAIN FRAME SETUP (Drag Logic)
+    self.frame:SetMovable(true)
+    self.frame:EnableMouse(false)
+    self.frame:RegisterForDrag("LeftButton")
+    self.frame:SetScript("OnDragStart", self.frame.StartMoving)
+    self.frame:SetScript("OnDragStop", function(f)
+        f:StopMovingOrSizing()
+        local x, y = f:GetCenter(); local ux, uy = UIParent:GetCenter()
+        addon.db[MOD_KEY].X = math.floor(x - ux)
+        addon.db[MOD_KEY].Y = math.floor(y - uy)
+    end)
 
     if ForgeSkin and ForgeSkin.ApplyBackdrop then
         ForgeSkin:ApplyBackdrop(self.frame)
@@ -201,12 +219,15 @@ end
 function BreakForge:UpdateStyle()
     local db = addon.db[MOD_KEY]
     if not self.frame then return end
-    self.frame:SetSize(db.Width, db.Height)
-    self.frame:SetPoint("CENTER", UIParent, "CENTER", db.X, db.Y)
     
-    -- [BORDER GÜNCELLEMESİ]
+    if not self.isUnlocked then
+        self.frame:ClearAllPoints()
+        self.frame:SetPoint("CENTER", UIParent, "CENTER", db.X, db.Y)
+    end
+
+    self.frame:SetSize(db.Width, db.Height)
+    
     if ForgeSkin and ForgeSkin.SetSmartBorder then
-        -- Argümanlar: Frame, Kalınlık, Renk(nil), Pozisyon(Inside/Center/Outside)
         ForgeSkin:SetSmartBorder(self.frame, db.BorderSize or 1, nil, db.BorderPosition or "OUTSIDE")
         self.frame:SetBackdropColor(0, 0, 0, db.BackgroundAlpha)
     end
@@ -214,11 +235,8 @@ function BreakForge:UpdateStyle()
     self.frame.icon:SetSize(db.Height, db.Height)
     local barWidth = db.Width - db.Height
     
-    -- Texture
     local texturePath = "Interface\\TargetingFrame\\UI-StatusBar"
     if ForgeSkin and ForgeSkin.Media and ForgeSkin.Media.Textures then texturePath = ForgeSkin.Media.Textures[db.Texture] or texturePath end
-    
-    -- Font ve Size
     local fontPath = "Fonts\\FRIZQT__.TTF"
     if ForgeSkin and ForgeSkin.Media and ForgeSkin.Media.Fonts then fontPath = ForgeSkin.Media.Fonts[db.Font] or fontPath end
     local fontSize = db.FontSize or 12
@@ -258,13 +276,46 @@ function BreakForge:RegisterEvents()
     addon.eventsHandler:Register(function() LoadClassInterrupt(BreakForge) end, "PLAYER_SPECIALIZATION_CHANGED")
 end
 
-function BreakForge:Test(on)
+-- [TEST & UNLOCK MANTIĞI GÜNCELLENDİ]
+function BreakForge:Test(toggle)
     if not addon.db[MOD_KEY]["Enabled"] then return end
-    if on then
+    if toggle == nil then self.isTesting = not self.isTesting else self.isTesting = toggle end
+
+    if self.isTesting then
         self.active = true; self.frame:Show()
-        self.frame.spellText:SetText("Test Cast"); self.frame.icon:SetTexture(UNKNOWN_SPELL_TEXTURE)
-        self.frame.statusBar:SetMinMaxValues(0,10); self.frame.statusBar:SetValue(5); self.frame.timeText:SetText("5.0")
-    else self.active=false; self.frame:Hide() end
+        self.frame.spellText:SetText("Test Mode")
+        self.frame.icon:SetTexture(UNKNOWN_SPELL_TEXTURE)
+        self.frame.statusBar:SetMinMaxValues(0, 10); self.frame.statusBar:SetValue(10)
+        self.frame.interruptReadyBar:SetMinMaxValues(0, 10); self.frame.interruptReadyBar:SetValue(10)
+        self.frame.interruptReadyBar:SetAlpha(1); self.frame.timeText:SetText("10.0")
+        
+        -- [MODULER CALL] Party Modülünü Test Et
+        if self.Party then self.Party:Test(true) end
+    else
+        self.active = false; self.frame:Hide()
+        if self.Party then self.Party:Test(false) end
+    end
+end
+
+function BreakForge:ToggleUnlock()
+    if not self.frame then return end
+    self.isUnlocked = not self.isUnlocked
+    
+    if self.isUnlocked then
+        self.frame:Show(); self.frame:EnableMouse(true)
+        self.frame.spellText:SetText("|cff00ff00MAIN BAR (DRAG)|r")
+        self.frame.statusBar:SetStatusBarColor(0.5, 0.5, 0.5, 1)
+        self.frame.interruptReadyBar:SetAlpha(0)
+        
+        -- [MODULER CALL] Party Unlock
+        if self.Party then self.Party:ToggleUnlock(true) end
+    else
+        self.frame:EnableMouse(false); self.frame:Hide()
+        self.frame.spellText:SetText(""); self:UpdateStyle()
+        
+        -- [MODULER CALL] Party Lock
+        if self.Party then self.Party:ToggleUnlock(false) end
+    end
 end
 
 local loader = CreateFrame("Frame"); loader:RegisterEvent("PLAYER_LOGIN"); loader:RegisterEvent("ADDON_LOADED")
