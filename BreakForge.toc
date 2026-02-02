@@ -1,0 +1,15 @@
+## Interface: 120000
+## Title: Break Forge
+## Notes: Advanced Interrupt & Coordination Tool
+## Author: You
+## Version: 2.0
+## SavedVariables: BreakForgeDB
+
+# Görsel Motor (Eğer kullanıyorsan)
+ForgeSkin.lua
+
+# Ana Mantık
+BreakForge.lua
+
+# Ayarlar
+Config.lua
