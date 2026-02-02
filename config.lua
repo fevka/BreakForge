@@ -11,7 +11,7 @@ function BF:ToggleConfig()
     if BF.ConfigFrame then if BF.ConfigFrame:IsShown() then BF.ConfigFrame:Hide() else BF.ConfigFrame:Show() end return end
 
     local f = CreateFrame("Frame", "BreakForgeConfig", UIParent, "BackdropTemplate")
-    f:SetSize(380, 750) -- Party ayarları için uzattık
+    f:SetSize(380, 850)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG"); f:EnableMouse(true); f:SetMovable(true); f:SetClampedToScreen(true)
     Skin:ApplyBackdrop(f); f:SetBackdropColor(unpack(Skin.Colors.bg)); Skin:SetSmartBorder(f)
@@ -32,68 +32,64 @@ function BF:ToggleConfig()
     for name, _ in pairs(Skin.Media.Textures) do table.insert(texItems, {text = name, value = name}) end
     table.sort(texItems, function(a,b) return a.text < b.text end)
     local ddTex = Skin:CreateDropdown(f, 200, texItems, function(val) addon.db[MOD_KEY].Texture = val; BF:UpdateStyle() end)
-    ddTex:SetPoint("LEFT", lblTex, "LEFT", 0, -25)
-    ddTex.text:SetText(addon.db[MOD_KEY].Texture or "Select...")
+    ddTex:SetPoint("LEFT", lblTex, "LEFT", 0, -25); ddTex.text:SetText(addon.db[MOD_KEY].Texture or "Select..."); ddTex:SetFrameLevel(f:GetFrameLevel() + 10)
 
+    -- FONT
     local lblFont = CreateLabel("Font", f, startY - 80)
     local fontItems = {}
     for name, _ in pairs(Skin.Media.Fonts) do table.insert(fontItems, {text = name, value = name}) end
     table.sort(fontItems, function(a,b) return a.text < b.text end)
     local ddFont = Skin:CreateDropdown(f, 200, fontItems, function(val) addon.db[MOD_KEY].Font = val; BF:UpdateStyle() end)
-    ddFont:SetPoint("LEFT", lblFont, "LEFT", 0, -25)
-    ddFont.text:SetText(addon.db[MOD_KEY].Font or "Select...")
+    ddFont:SetPoint("LEFT", lblFont, "LEFT", 0, -25); ddFont.text:SetText(addon.db[MOD_KEY].Font or "Select..."); ddFont:SetFrameLevel(f:GetFrameLevel() + 10)
 
-    local lblFSize = CreateLabel("Font Size", f, startY - 130)
-    local sFSize = Skin:CreateSlider(f, 8, 30, 1, addon.db[MOD_KEY].FontSize or 12, function(val) 
-        addon.db[MOD_KEY].FontSize = val; BF:UpdateStyle() 
-    end, 200)
+    -- FONT OUTLINE [YENİ]
+    local lblOutline = CreateLabel("Font Outline", f, startY - 130)
+    local outlineItems = { {text="None", value=""}, {text="Outline", value="OUTLINE"}, {text="Thick Outline", value="THICKOUTLINE"}, {text="Monochrome", value="MONOCHROME"} }
+    local ddOutline = Skin:CreateDropdown(f, 200, outlineItems, function(val) addon.db[MOD_KEY].FontOutline = val; BF:UpdateStyle() end)
+    ddOutline:SetPoint("LEFT", lblOutline, "LEFT", 0, -25); ddOutline.text:SetText(addon.db[MOD_KEY].FontOutline or "OUTLINE"); ddOutline:SetFrameLevel(f:GetFrameLevel() + 10)
+
+    -- FONT SIZE
+    local lblFSize = CreateLabel("Font Size", f, startY - 180)
+    local sFSize = Skin:CreateSlider(f, 8, 30, 1, addon.db[MOD_KEY].FontSize or 12, function(val) addon.db[MOD_KEY].FontSize = val; BF:UpdateStyle() end, 200)
     sFSize:SetPoint("LEFT", lblFSize, "LEFT", 0, -25)
 
-    local lblBorder = CreateLabel("Border", f, startY - 180)
-    local sBorder = Skin:CreateSlider(f, 0, 10, 1, addon.db[MOD_KEY].BorderSize or 1, function(val)
-        addon.db[MOD_KEY].BorderSize = val; BF:UpdateStyle()
-    end, 100)
+    -- BORDER
+    local lblBorder = CreateLabel("Border", f, startY - 230)
+    local sBorder = Skin:CreateSlider(f, 0, 10, 1, addon.db[MOD_KEY].BorderSize or 1, function(val) addon.db[MOD_KEY].BorderSize = val; BF:UpdateStyle() end, 100)
     sBorder:SetPoint("LEFT", lblBorder, "LEFT", 0, -25)
     
-    local posItems = {{text = "Inside", value = "INSIDE"}, {text = "Center", value = "CENTER"}, {text = "Outside", value = "OUTSIDE"}}
-    local ddPos = Skin:CreateDropdown(f, 95, posItems, function(val) addon.db[MOD_KEY].BorderPosition = val; BF:UpdateStyle() end)
-    ddPos:SetPoint("LEFT", sBorder, "RIGHT", 5, 0)
-    ddPos.text:SetText(addon.db[MOD_KEY].BorderPosition or "OUTSIDE")
+    local posItems = {{text="Inside", value="INSIDE"}, {text="Center", value="CENTER"}, {text="Outside", value="OUTSIDE"}}
+    local ddPos = Skin:CreateDropdown(f, 110, posItems, function(val) addon.db[MOD_KEY].BorderPosition = val; BF:UpdateStyle() end)
+    ddPos:SetPoint("LEFT", sBorder, "RIGHT", 15, 0); ddPos.text:SetText(addon.db[MOD_KEY].BorderPosition or "OUTSIDE"); ddPos:SetFrameLevel(f:GetFrameLevel() + 20) 
 
-    -- === SIZE & POSITION ===
-    local sizeY = startY - 250
-    Skin:CreateSectionHeader(f, "Main Bar", 340):SetPoint("TOP", 0, sizeY + 10)
+    -- === MAIN BAR ===
+    local mainY = startY - 300
+    Skin:CreateSectionHeader(f, "Main Bar Size", 340):SetPoint("TOP", 0, mainY + 10)
     
     local sWidth = Skin:CreateSlider(f, 100, 600, 10, addon.db[MOD_KEY].Width, function(val) addon.db[MOD_KEY].Width = val; BF:UpdateStyle() end, 150)
-    sWidth:SetPoint("TOPLEFT", 20, sizeY - 40)
+    sWidth:SetPoint("TOPLEFT", 20, mainY - 40)
     
     local sHeight = Skin:CreateSlider(f, 10, 100, 1, addon.db[MOD_KEY].Height, function(val) addon.db[MOD_KEY].Height = val; BF:UpdateStyle() end, 150)
     sHeight:SetPoint("LEFT", sWidth, "RIGHT", 10, 0)
 
-    local sX = Skin:CreateSlider(f, -1000, 1000, 10, addon.db[MOD_KEY].X, function(val) addon.db[MOD_KEY].X = val; BF:UpdateStyle() end, 150)
-    sX:SetPoint("TOPLEFT", sWidth, "BOTTOMLEFT", 0, -30)
-    
-    local sY = Skin:CreateSlider(f, -1000, 1000, 10, addon.db[MOD_KEY].Y, function(val) addon.db[MOD_KEY].Y = val; BF:UpdateStyle() end, 150)
-    sY:SetPoint("LEFT", sX, "RIGHT", 10, 0)
-
-    -- === PARTY SETTINGS [YENİ] ===
-    local partyY = sizeY - 140
+    -- === PARTY BARS [GÜNCELLENDİ - X/Y SİLİNDİ, YENİ AYARLAR GELDİ] ===
+    local partyY = mainY - 90
     Skin:CreateSectionHeader(f, "Party Bars", 340):SetPoint("TOP", 0, partyY + 10)
     
     local sPWidth = Skin:CreateSlider(f, 100, 400, 10, addon.db[MOD_KEY].PartyWidth or 200, function(val) addon.db[MOD_KEY].PartyWidth = val end, 150)
     sPWidth:SetPoint("TOPLEFT", 20, partyY - 40)
     
-    local sPHeight = Skin:CreateSlider(f, 10, 50, 1, addon.db[MOD_KEY].PartyHeight or 20, function(val) addon.db[MOD_KEY].PartyHeight = val end, 150)
+    local sPHeight = Skin:CreateSlider(f, 10, 50, 1, addon.db[MOD_KEY].PartyHeight or 30, function(val) addon.db[MOD_KEY].PartyHeight = val end, 150)
     sPHeight:SetPoint("LEFT", sPWidth, "RIGHT", 10, 0)
-    
-    local sPX = Skin:CreateSlider(f, -1000, 1000, 10, addon.db[MOD_KEY].PartyX or -200, function(val) addon.db[MOD_KEY].PartyX = val; BF:UpdateStyle() end, 150)
-    sPX:SetPoint("TOPLEFT", sPWidth, "BOTTOMLEFT", 0, -30)
-    
-    local sPY = Skin:CreateSlider(f, -1000, 1000, 10, addon.db[MOD_KEY].PartyY or 0, function(val) addon.db[MOD_KEY].PartyY = val; BF:UpdateStyle() end, 150)
-    sPY:SetPoint("LEFT", sPX, "RIGHT", 10, 0)
+
+    local sPIcon = Skin:CreateSlider(f, 10, 50, 1, addon.db[MOD_KEY].PartyIconSize or 30, function(val) addon.db[MOD_KEY].PartyIconSize = val end, 150)
+    sPIcon:SetPoint("TOPLEFT", sPWidth, "BOTTOMLEFT", 0, -30)
+
+    local sPSpacing = Skin:CreateSlider(f, 0, 20, 1, addon.db[MOD_KEY].PartySpacing or 5, function(val) addon.db[MOD_KEY].PartySpacing = val end, 150)
+    sPSpacing:SetPoint("LEFT", sPIcon, "RIGHT", 10, 0)
 
     -- === COLORS ===
-    local colorY = partyY - 140
+    local colorY = partyY - 160
     Skin:CreateSectionHeader(f, "Colors", 340):SetPoint("TOP", 0, colorY + 10)
 
     local cpBar = Skin:CreateColorPicker(f, "Cooldown Color", HexToColorTable(addon.db[MOD_KEY].CooldownColor), function(c) addon.db[MOD_KEY].CooldownColor = ColorTableToHex(c); BF:UpdateStyle() end, 340)
@@ -107,11 +103,11 @@ function BF:ToggleConfig()
 
     -- === BUTTONS ===
     local btnTest = Skin:CreateButton(f, "Toggle Test", 140, 30)
-    btnTest:SetPoint("BOTTOMLEFT", 20, 30)
+    btnTest:SetPoint("BOTTOMLEFT", 20, 40)
     btnTest:SetScript("OnClick", function() BF:Test() end)
     
     local btnUnlock = Skin:CreateButton(f, "Unlock / Move", 140, 30)
-    btnUnlock:SetPoint("BOTTOMRIGHT", -20, 30)
+    btnUnlock:SetPoint("BOTTOMRIGHT", -20, 40)
     if Skin.Colors and Skin.Colors.accent then btnUnlock:SetBackdropColor(unpack(Skin.Colors.accent)) end
     btnUnlock:SetScript("OnClick", function() BF:ToggleUnlock() end)
 

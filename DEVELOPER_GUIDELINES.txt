@@ -1,0 +1,63 @@
+==============================================================================
+PROJECT BREAKFORGE - API 12.0 DEVELOPMENT GUIDELINES & RESTRICTIONS
+==============================================================================
+
+[1] THE GOLDEN RULE (ALTIN KURAL)
+    Asla ve asla oyunun sağladığı Cooldown veya Aura sürelerini kodun karar 
+    mekanizmasında (if/else) kullanma.
+    
+    YANLIŞ (CRASH SEBEBİ):
+    local info = C_Spell.GetSpellCooldown(spellID)
+    if info.duration > 0 then ... end  <-- "Secret Value" Hatası verir!
+
+    DOĞRU (MANUEL TAKİP):
+    -- Kendi tuttuğumuz veriyi kullanacağız.
+    if GetTime() < self.nextReadyTime then ... end
+
+[2] COOLDOWN TRACKING STRATEGY (CD TAKİP STRATEJİSİ)
+    Oyunun API'sine güvenmek yasak. "Fire and Forget" yöntemi kullanılacak.
+    
+    1. Event Yakala: UNIT_SPELLCAST_SUCCEEDED (Oyuncu büyüyü başarıyla attı).
+    2. Manuel Kayıt: 
+       self.lastCastTime = GetTime()
+       self.cdDuration = 15 -- (Statik veriden okunacak)
+    3. Hesaplama:
+       Kalan Süre = (self.lastCastTime + self.cdDuration) - GetTime()
+    
+    Bu yöntem %100 güvenlidir ve API kısıtlamalarına takılmaz.
+
+[3] REMOVED / CHANGED FUNCTIONS (DEĞİŞEN FONKSİYONLAR)
+    Blizzard API 11.0+ güncellemesi ile global fonksiyonları sildi.
+    
+    ❌ YASAK: GetSpellInfo(1766)
+    ✅ DOĞRU: C_Spell.GetSpellInfo(1766).iconID
+
+    ❌ YASAK: GetSpellCooldown(1766)
+    ✅ DOĞRU: HİÇ KULLANMA. Manuel timer kullan.
+
+[4] PARTY SYNC PROTOCOL (SENKRONİZASYON PROTOKOLÜ)
+    Başkalarının CD'sini sorgulayamayız. Onlar bize haber vermeli.
+    
+    1. Gönderici (Sender): Büyü attığı an (UNIT_SPELLCAST_SUCCEEDED), 
+       Addon kanalından "BEN ATTIM: SPELL_ID: SURE" mesajı yayar.
+    2. Alıcı (Receiver): Mesajı alır, gönderen kişinin ismine bir 
+       bar açar ve geri sayımı başlatır.
+    
+    Asla "Inspect" veya "Request Cooldown" yapılmayacak. Sadece "Broadcast" (Yayın).
+
+[5] UNIT IDS & GUIDs
+    İsimler değişebilir, GUID (Global Unique Identifier) sabittir.
+    Mümkünse veri takibini GUID üzerinden yap, ekrana çizerken isme çevir.
+
+[6] SECURE FRAMES (PROTECTED FRAMES)
+    Savaş sırasında (InCombatLockdown) butonların yerini değiştiremez, 
+    gizleyip açamazsın (Show/Hide bazen serbest ama SetPoint yasak).
+    
+    * BreakForge sadece "Görsel Bilgi" sunduğu için (Tıklanabilir aksiyon butonu değil),
+    * Savaş sırasında barı gizleyip açmak (Show/Hide) serbesttir.
+    * Ancak "Cast Bar" gibi davranan bir buton yaparsak kısıtlanırız.
+    * Şimdilik sadece "Frame" ve "StatusBar" kullanıyoruz, bu güvenli.
+
+==============================================================================
+END OF GUIDELINES
+==============================================================================

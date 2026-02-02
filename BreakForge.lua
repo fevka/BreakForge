@@ -8,14 +8,24 @@ local addon = ns
 addon.dbDefault = {
     BreakForge = {
         Enabled = true, Hidden = false, Mute = false, 
-        Width = 300, Height = 30, X = 0, Y = -150, IconZoom = 0.1, 
+        Width = 300, Height = 30, IconZoom = 0.1, X = 0, Y = -150,
         
         -- Party Ayarları
-        PartyEnabled = true, PartyWidth = 200, PartyHeight = 20, PartyX = -200, PartyY = 0,
+        PartyEnabled = true, 
+        PartyWidth = 220, 
+        PartyHeight = 30, 
+        PartyIconSize = 30, 
+        PartySpacing = 5,
+        PartyX = -250, PartyY = 0,
         
         -- Görsel Ayarlar
-        Texture = "2. Smooth", Font = "Friz Quadrata", FontSize = 12, 
-        BackgroundAlpha = 0.8, BorderSize = 1, BorderPosition = "OUTSIDE",
+        Texture = "2. Smooth", 
+        Font = "Friz Quadrata", 
+        FontSize = 12, 
+        FontOutline = "OUTLINE", -- [YENİ]
+        BackgroundAlpha = 0.8, 
+        BorderSize = 1, 
+        BorderPosition = "OUTSIDE",
         
         -- Renkler
         CooldownColor = "FF7700", InterruptibleColor = "FF0000",
@@ -46,7 +56,6 @@ local function SetAlphaFromBoolean(self, condition, trueAlpha, falseAlpha)
 end
 local function AddMixin(frame) if not frame.SetAlphaFromBoolean then frame.SetAlphaFromBoolean = SetAlphaFromBoolean end end
 
--- Duration Wrapper
 local function CreateDurationObject(s, e)
     local obj = {}
     obj.GetTotalDuration = function() return (e - s) / 1000 end
@@ -58,7 +67,7 @@ if not _G.UnitCastingDuration then _G.UnitCastingDuration = function(u) local _,
 if not _G.UnitChannelDuration then _G.UnitChannelDuration = function(u) local _,_,_,s,e=UnitChannelInfo(u); return CreateDurationObject(s or 0,e or 0) end end
 
 -- ============================================================================
--- 2. BÖLÜM: CORE MANTIK (PLAYER ONLY)
+-- 2. BÖLÜM: CORE MANTIK
 -- ============================================================================
 
 BreakForge = { 
@@ -97,20 +106,18 @@ local function LoadClassInterrupt(self)
     else self.interruptID = 0; self.interruptCD = 0 end
 end
 
--- [CORE] Interrupt Kullanımı Kaydet & Sync Gönder
 local function RecordInterruptUsage(self, spellID)
     if spellID == self.interruptID then 
         self.nextReadyTime = GetTime() + self.interruptCD
-        -- [MODULER CALL] Party Modülüne Haber Ver
-        if BreakForge.Party then
-            BreakForge.Party:SendSync(spellID, self.interruptCD)
-        end
+        if BreakForge.Party then BreakForge.Party:SendSync(spellID, self.interruptCD) end
     end
 end
 
+-- [MANUEL TAKİP]
 local function IsSpellReady(self)
     if self.interruptID == 0 then return false end
-    return GetTime() > self.nextReadyTime
+    if GetTime() <= self.nextReadyTime then return false end
+    return true
 end
 
 local function GetInterrupter(guid) return UnitNameFromGUID(guid) end
@@ -178,10 +185,8 @@ function BreakForge:Initialize()
     self.frame:Hide()
     AddMixin(self.frame)
 
-    -- [MODULER] Party Modülünü Başlat
     if self.Party then self.Party:Initialize() end
 
-    -- MAIN FRAME SETUP (Drag Logic)
     self.frame:SetMovable(true)
     self.frame:EnableMouse(false)
     self.frame:RegisterForDrag("LeftButton")
@@ -200,8 +205,16 @@ function BreakForge:Initialize()
         self.frame.bg = self.frame:CreateTexture(nil,"BACKGROUND"); self.frame.bg:SetAllPoints(); self.frame.bg:SetColorTexture(0,0,0,0.5)
     end
 
-    self.frame.icon = self.frame:CreateTexture(nil, "ARTWORK")
-    self.frame.icon:SetPoint("LEFT", self.frame, "LEFT", 0, 0)
+    -- [İKON ÇERÇEVESİ]
+    self.frame.iconBox = CreateFrame("Frame", nil, self.frame, "BackdropTemplate")
+    self.frame.iconBox:SetPoint("LEFT", 0, 0)
+    -- Kenarlık ekle (1px siyah)
+    self.frame.iconBox:SetBackdrop({edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1})
+    self.frame.iconBox:SetBackdropBorderColor(0,0,0,1)
+
+    self.frame.icon = self.frame.iconBox:CreateTexture(nil, "ARTWORK")
+    self.frame.icon:SetPoint("TOPLEFT", 1, -1) -- 1px içeriden başlat
+    self.frame.icon:SetPoint("BOTTOMRIGHT", -1, 1)
     
     self.frame.statusBar = CreateFrame("StatusBar", nil, self.frame); self.frame.statusBar:SetPoint("RIGHT"); AddMixin(self.frame.statusBar)
     self.frame.interruptReadyBar = CreateFrame("StatusBar", nil, self.frame); self.frame.interruptReadyBar:SetPoint("RIGHT"); AddMixin(self.frame.interruptReadyBar)
@@ -232,7 +245,8 @@ function BreakForge:UpdateStyle()
         self.frame:SetBackdropColor(0, 0, 0, db.BackgroundAlpha)
     end
     
-    self.frame.icon:SetSize(db.Height, db.Height)
+    -- İkon Kutusu Boyutu
+    self.frame.iconBox:SetSize(db.Height, db.Height)
     local barWidth = db.Width - db.Height
     
     local texturePath = "Interface\\TargetingFrame\\UI-StatusBar"
@@ -240,6 +254,7 @@ function BreakForge:UpdateStyle()
     local fontPath = "Fonts\\FRIZQT__.TTF"
     if ForgeSkin and ForgeSkin.Media and ForgeSkin.Media.Fonts then fontPath = ForgeSkin.Media.Fonts[db.Font] or fontPath end
     local fontSize = db.FontSize or 12
+    local fontOutline = db.FontOutline or "OUTLINE" -- [YENİ]
 
     local function UpdateBar(bar, colorHex)
         bar:SetSize(barWidth, db.Height)
@@ -253,10 +268,10 @@ function BreakForge:UpdateStyle()
     
     self.frame.spellText:SetPoint("LEFT", self.frame, "LEFT", db.Height + 5, 0)
     self.frame.spellText:SetSize(0.7 * barWidth, fontSize)
-    self.frame.spellText:SetFont(fontPath, fontSize, "OUTLINE")
+    self.frame.spellText:SetFont(fontPath, fontSize, fontOutline)
     
     self.frame.timeText:SetPoint("RIGHT", self.frame, "RIGHT", -5, 0)
-    self.frame.timeText:SetFont(fontPath, fontSize, "OUTLINE")
+    self.frame.timeText:SetFont(fontPath, fontSize, fontOutline)
 end
 
 function BreakForge:RegisterEvents()
@@ -274,9 +289,10 @@ function BreakForge:RegisterEvents()
     addon.eventsHandler:Register(Stop, "UNIT_SPELLCAST_STOP", "target"); addon.eventsHandler:Register(Stop, "UNIT_SPELLCAST_STOP", "focus")
     addon.eventsHandler:Register(Stop, "UNIT_SPELLCAST_INTERRUPTED", "target"); addon.eventsHandler:Register(Stop, "UNIT_SPELLCAST_INTERRUPTED", "focus")
     addon.eventsHandler:Register(function() LoadClassInterrupt(BreakForge) end, "PLAYER_SPECIALIZATION_CHANGED")
+    C_ChatInfo.RegisterAddonMessagePrefix(self.commPrefix)
+    addon.eventsHandler:Register(function(...) if BreakForge.Party then BreakForge.Party:OnCommReceived(...) end end, "CHAT_MSG_ADDON")
 end
 
--- [TEST & UNLOCK MANTIĞI GÜNCELLENDİ]
 function BreakForge:Test(toggle)
     if not addon.db[MOD_KEY]["Enabled"] then return end
     if toggle == nil then self.isTesting = not self.isTesting else self.isTesting = toggle end
@@ -288,8 +304,6 @@ function BreakForge:Test(toggle)
         self.frame.statusBar:SetMinMaxValues(0, 10); self.frame.statusBar:SetValue(10)
         self.frame.interruptReadyBar:SetMinMaxValues(0, 10); self.frame.interruptReadyBar:SetValue(10)
         self.frame.interruptReadyBar:SetAlpha(1); self.frame.timeText:SetText("10.0")
-        
-        -- [MODULER CALL] Party Modülünü Test Et
         if self.Party then self.Party:Test(true) end
     else
         self.active = false; self.frame:Hide()
@@ -300,20 +314,15 @@ end
 function BreakForge:ToggleUnlock()
     if not self.frame then return end
     self.isUnlocked = not self.isUnlocked
-    
     if self.isUnlocked then
         self.frame:Show(); self.frame:EnableMouse(true)
         self.frame.spellText:SetText("|cff00ff00MAIN BAR (DRAG)|r")
         self.frame.statusBar:SetStatusBarColor(0.5, 0.5, 0.5, 1)
         self.frame.interruptReadyBar:SetAlpha(0)
-        
-        -- [MODULER CALL] Party Unlock
         if self.Party then self.Party:ToggleUnlock(true) end
     else
         self.frame:EnableMouse(false); self.frame:Hide()
         self.frame.spellText:SetText(""); self:UpdateStyle()
-        
-        -- [MODULER CALL] Party Lock
         if self.Party then self.Party:ToggleUnlock(false) end
     end
 end

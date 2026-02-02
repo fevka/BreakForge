@@ -1,8 +1,8 @@
 ## Interface: 120000
 ## Title: Break Forge
-## Notes: Advanced Interrupt & Coordination Tool
+## Notes: Advanced Interrupt & Coordination Tool (API 12.0)
 ## Author: You
-## Version: 2.5
+## Version: 3.0
 ## SavedVariables: BreakForgeDB
 
 ForgeSkin.lua
