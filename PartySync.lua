@@ -26,6 +26,7 @@ end
 
 function Party:OnCommReceived(prefix, text, channel, sender)
     if prefix ~= self.commPrefix then return end
+    sender = Ambiguate(sender, "none")
     if sender == UnitName("player") then return end
     
     local cmd, spellID, duration, timestamp = strsplit(":", text)

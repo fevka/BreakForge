@@ -74,7 +74,9 @@ BreakForge = {
     frame = nil, active = false, 
     interruptID = 0, interruptCD = 0, nextReadyTime = 0, 
     subInterrupt = nil, timer = nil, commPrefix = "BF_SYNC",
-    isTesting = false, isUnlocked = false
+    isTesting = false, isUnlocked = false,
+    -- API 12: notInterruptible "secret" olduğu için olaylarla takip ediyoruz
+    targetCastShielded = false, focusCastShielded = false, displayUnit = nil
 }
 _G["BreakForge"] = BreakForge
 local L = LibStub.GetLocale(ADDON_NAME); local MOD_KEY = "BreakForge"; local UNKNOWN_SPELL_TEXTURE = 134400
@@ -146,6 +148,18 @@ end
 
 local function GetInterrupter(guid) return UnitNameFromGUID(guid) end
 
+-- Nameplate cast bar'dan kesilemezlik (asInterruptHelper gibi); secret değere dokunmadan
+local function GetNamePlateCastBarShielded(unit)
+    if not C_NamePlate or not C_NamePlate.GetNamePlateForUnit then return nil end
+    local ok, nameplate = pcall(C_NamePlate.GetNamePlateForUnit, unit, false)
+    if not ok or not nameplate or not nameplate.UnitFrame or not nameplate.UnitFrame.castBar then return nil end
+    local bar = nameplate.UnitFrame.castBar
+    local barType = bar.barType or bar.BarType
+    if barType == "uninterruptable" or barType == "UNINTERRUPTABLE" then return true end
+    if barType == "interruptable" or barType == "INTERRUPTABLE" or barType == "default" then return false end
+    return nil
+end
+
 local function SetBarInterruptedColor(self, interrupted)
     if interrupted then
         self.frame.statusBar:SetStatusBarColor(addon.Utilities:HexToRGB(addon.db[MOD_KEY]["InterruptedColor"]))
@@ -200,30 +214,44 @@ local function InterruptHandler(self, guid)
     self.timer = C_Timer.NewTimer(0.75, function() self.timer=nil; self.frame:Hide(); SetBarInterruptedColor(self, false) end)
 end
 
-local function CastsHandler(self, duration, isChannel, notInterruptible)
-    self.frame.durationObj = duration -- [FIX] Store on frame for dynamic access
+local function CastsHandler(self, duration, isChannel, unit, onCastEndRefresh)
+    self.displayUnit = unit
+    self.frame.durationObj = duration
     self.frame.statusBar:SetMinMaxValues(0, duration:GetTotalDuration())
-    
-    -- [FIX] Upvalue capture fix with pcall for safety
-    local isShielded = false
-    local success, result = pcall(function() return notInterruptible == true end)
-    if success then isShielded = result end
 
     self.frame:SetScript("OnUpdate", function (f)
         if self.isTesting or self.isUnlocked then return end
         if not self.active then return end
-        -- [DYNAMIC] Use stored duration object
+        -- API 12 uyumlu: Sadece "unit hâlâ büyü yapıyor mu?" kontrolü (isim; secret yok). Kesilemeyen dahil büyü bitince çubuk kapansın.
+        local unit = self.displayUnit
+        local nameCh = UnitChannelInfo(unit)
+        local nameCast = UnitCastingInfo(unit)
+        if not nameCh and not nameCast then
+            self.active = false
+            f:SetScript("OnUpdate", nil)
+            f:Hide()
+            if type(onCastEndRefresh) == "function" then onCastEndRefresh(self) end
+            return
+        end
         local dObj = f.durationObj
-        if not dObj then return end -- Safety
-        
+        if not dObj then return end
+
         local remaining = isChannel and dObj:GetRemainingDuration() or dObj:GetElapsedDuration()
         f.statusBar:SetValue(remaining)
         f.timeText:SetText(string.format("%.1f", dObj:GetRemainingDuration()))
-        
-        -- Renk Mantığı (Tek Bar)
+
+        -- Kesilebilirlik: önce nameplate cast bar (barType), yoksa olay bayrakları
+        local npShielded = GetNamePlateCastBarShielded(self.displayUnit)
+        local isShielded
+        if npShielded ~= nil then
+            isShielded = npShielded
+            if self.displayUnit == "target" then self.targetCastShielded = npShielded elseif self.displayUnit == "focus" then self.focusCastShielded = npShielded end
+        else
+            isShielded = (self.displayUnit == "target" and self.targetCastShielded) or (self.displayUnit == "focus" and self.focusCastShielded)
+        end
+
         local db = addon.db[MOD_KEY]
         local r,g,b = 1,1,1
-        
         if self.isInterrupted then
              r,g,b = addon.Utilities:HexToRGB(db.InterruptedColor)
         elseif isShielded then
@@ -233,7 +261,6 @@ local function CastsHandler(self, duration, isChannel, notInterruptible)
         else
              r,g,b = addon.Utilities:HexToRGB(db.ColorCooldown)
         end
-        
         f.statusBar:SetStatusBarColor(r,g,b)
     end)
     self.frame:SetAlphaFromBoolean(addon.db[MOD_KEY]["Hidden"], 0, 255)
@@ -280,16 +307,22 @@ local function Handler(self)
     if self.isTesting or self.isUnlocked then return end
     if not addon.db[MOD_KEY]["Enabled"] then self.frame:Hide(); return end
     local unit = "target"; if not UnitExists("target") then unit = "focus" end
-    local name, _, texture, _, _, _, notInterruptible = UnitChannelInfo(unit)
+    -- API 12: notInterruptible secret; sadece isim/doku/süre alıyoruz, kesilebilirlik UNIT_SPELLCAST_* olaylarından
+    local name, _, texture = UnitChannelInfo(unit)
     local isChannel = false
-    if name then isChannel = true else name, _, texture, _, _, _, _, notInterruptible = UnitCastingInfo(unit) end
+    if name then isChannel = true else name, _, texture = UnitCastingInfo(unit) end
     if not name then self.active = false; self.frame:Hide(); return end
+    -- Kesilemezlik: önce nameplate cast bar (güvenilir), yoksa olay bayrakları
+    local npShielded = GetNamePlateCastBarShielded(unit)
+    if npShielded ~= nil then
+        if unit == "target" then self.targetCastShielded = npShielded elseif unit == "focus" then self.focusCastShielded = npShielded end
+    end
     local duration = isChannel and _G.UnitChannelDuration(unit) or _G.UnitCastingDuration(unit)
     local targetName = UnitSpellTargetName(unit)
     self.frame.spellText:SetText(targetName and (name.." -> "..targetName) or name)
     self.frame.icon:SetTexture(texture or UNKNOWN_SPELL_TEXTURE)
-    self.isInterrupted = false -- Reset state
-    CastsHandler(self, duration, isChannel, notInterruptible)
+    self.isInterrupted = false
+    CastsHandler(self, duration, isChannel, unit, Handler)
 end
 
 function BreakForge:Initialize()
@@ -399,15 +432,22 @@ function BreakForge:RegisterEvents()
         end 
     end)
     
+    -- Kesilebilirlik: API 12 secret değer yerine olaylarla takip (asInterruptHelper gibi)
+    addon.eventsHandler:Register(function(_, unit) if unit == "target" then self.targetCastShielded = true elseif unit == "focus" then self.focusCastShielded = true end end, "UNIT_SPELLCAST_NOT_INTERRUPTIBLE", "target")
+    addon.eventsHandler:Register(function(_, unit) if unit == "target" then self.targetCastShielded = false elseif unit == "focus" then self.focusCastShielded = false end end, "UNIT_SPELLCAST_INTERRUPTIBLE", "target")
+    addon.eventsHandler:Register(function(_, unit) if unit == "target" then self.targetCastShielded = false elseif unit == "focus" then self.focusCastShielded = false end end, "UNIT_SPELLCAST_START", "target")
+    addon.eventsHandler:Register(function(_, unit) if unit == "target" then self.targetCastShielded = false elseif unit == "focus" then self.focusCastShielded = false end end, "UNIT_SPELLCAST_CHANNEL_START", "target")
     addon.eventsHandler:Register(Start, "UNIT_SPELLCAST_START", "target"); addon.eventsHandler:Register(Start, "UNIT_SPELLCAST_START", "focus")
     addon.eventsHandler:Register(Start, "UNIT_SPELLCAST_CHANNEL_START", "target"); addon.eventsHandler:Register(Start, "UNIT_SPELLCAST_CHANNEL_START", "focus")
     addon.eventsHandler:Register(Start, "PLAYER_TARGET_CHANGED"); addon.eventsHandler:Register(Start, "PLAYER_FOCUS_CHANGED")
     addon.eventsHandler:Register(Stop, "UNIT_SPELLCAST_STOP", "target"); addon.eventsHandler:Register(Stop, "UNIT_SPELLCAST_STOP", "focus")
     addon.eventsHandler:Register(Stop, "UNIT_SPELLCAST_INTERRUPTED", "target"); addon.eventsHandler:Register(Stop, "UNIT_SPELLCAST_INTERRUPTED", "focus")
+    -- Savaştan çıkınca çubuk gizlensin (hedef/odak yoksa veya büyü yoksa)
+    addon.eventsHandler:Register(function() Handler(self) end, "PLAYER_REGEN_ENABLED")
     addon.eventsHandler:Register(function() LoadClassInterrupt(BreakForge) end, "PLAYER_SPECIALIZATION_CHANGED")
     C_ChatInfo.RegisterAddonMessagePrefix(self.commPrefix)
     addon.eventsHandler:Register(function(event, ...) 
-        local text, prefix, channel, sender = ...
+        local prefix, text, channel, sender = ...
         if BreakForge.Party then BreakForge.Party:OnCommReceived(prefix, text, channel, sender) end 
     end, "CHAT_MSG_ADDON")
 end

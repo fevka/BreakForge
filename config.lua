@@ -44,7 +44,7 @@ function BF:ToggleConfig()
 
     -- FONT OUTLINE [YENİ]
     local lblOutline = CreateLabel("Font Outline", f, startY - 130)
-    local outlineItems = { {text="None", value=""}, {text="Outline", value="OUTLINE"}, {text="Thick Outline", value="THICKOUTLINE"}, {text="Monochrome", value="MONOCHROME"} }
+    local outlineItems = { {text="None", value=""}, {text="Outline", value="OUTLINE"}, {text="Thick", value="THICKOUTLINE"}, {text="Monochrome", value="MONOCHROME"} }
     local ddOutline = Skin:CreateDropdown(f, 200, outlineItems, function(val) addon.db[MOD_KEY].FontOutline = val; BF:UpdateStyle() end)
     ddOutline:SetPoint("LEFT", lblOutline, "LEFT", 0, -25); ddOutline.text:SetText(addon.db[MOD_KEY].FontOutline or "OUTLINE"); ddOutline:SetFrameLevel(f:GetFrameLevel() + 10)
 
@@ -92,10 +92,10 @@ function BF:ToggleConfig()
     local colorY = partyY - 160
     Skin:CreateSectionHeader(f, "Colors", 340):SetPoint("TOP", 0, colorY + 10)
 
-    local cpBar = Skin:CreateColorPicker(f, "Cooldown Color", HexToColorTable(addon.db[MOD_KEY].CooldownColor), function(c) addon.db[MOD_KEY].CooldownColor = ColorTableToHex(c); BF:UpdateStyle() end, 340)
+    local cpBar = Skin:CreateColorPicker(f, "Cooldown Color", HexToColorTable(addon.db[MOD_KEY].ColorCooldown), function(c) addon.db[MOD_KEY].ColorCooldown = ColorTableToHex(c); BF:UpdateStyle() end, 340)
     cpBar:SetPoint("TOPLEFT", 20, colorY - 30)
 
-    local cpInt = Skin:CreateColorPicker(f, "Ready Color", HexToColorTable(addon.db[MOD_KEY].InterruptibleColor), function(c) addon.db[MOD_KEY].InterruptibleColor = ColorTableToHex(c); BF:UpdateStyle() end, 340)
+    local cpInt = Skin:CreateColorPicker(f, "Ready Color", HexToColorTable(addon.db[MOD_KEY].ColorReady), function(c) addon.db[MOD_KEY].ColorReady = ColorTableToHex(c); BF:UpdateStyle() end, 340)
     cpInt:SetPoint("TOPLEFT", 20, colorY - 70)
 
     local cpShield = Skin:CreateColorPicker(f, "Shield Color", HexToColorTable(addon.db[MOD_KEY].NotInterruptibleColor), function(c) addon.db[MOD_KEY].NotInterruptibleColor = ColorTableToHex(c); BF:UpdateStyle() end, 340)
